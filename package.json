@@ -1,0 +1,49 @@
+{
+  "name": "preflight",
+  "version": "0.1.0",
+  "private": true,
+  "files": [
+    "dist",
+    "emdash-plugin.jsonc"
+  ],
+  "type": "module",
+  "main": "dist/index.mjs",
+  "exports": {
+    ".": {
+      "import": "./dist/index.mjs",
+      "types": "./dist/index.d.mts"
+    },
+    "./sandbox": "./dist/plugin.mjs"
+  },
+  "scripts": {
+    "validate": "emdash-plugin validate",
+    "build": "emdash-plugin build",
+    "dev": "emdash-plugin dev",
+    "typecheck": "tsc --noEmit",
+    "test": "emdash-plugin validate && vitest run",
+    "lint": "oxlint src tests",
+    "format": "oxfmt src tests package.json emdash-plugin.jsonc README.md docs",
+    "format:check": "oxfmt --check src tests package.json emdash-plugin.jsonc README.md docs",
+    "bundle": "emdash-plugin bundle",
+    "login": "emdash-plugin login",
+    "publish": "emdash-plugin publish",
+    "release:setup": "emdash-plugin release setup"
+  },
+  "dependencies": {
+    "zod": "4.5.4"
+  },
+  "devDependencies": {
+    "@emdash-cms/blocks": "0.42.0",
+    "@emdash-cms/plugin-cli": "0.13.1",
+    "@emdash-cms/plugin-test": "^0.2.6",
+    "emdash": ">=0.39.0 <1.0.0",
+    "oxfmt": "^0.71.0",
+    "oxlint": "^1.86.0",
+    "typescript": "^5.9.0",
+    "vitest": "^4.1.0"
+  },
+  "peerDependencies": {
+    "emdash": ">=0.39.0"
+  },
+  "packageManager": "pnpm@10.11.0"
+}

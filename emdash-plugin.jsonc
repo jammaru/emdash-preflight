@@ -1,0 +1,45 @@
+{
+  "$schema": "./node_modules/@emdash-cms/plugin-cli/schemas/emdash-plugin.schema.json",
+  "slug": "preflight",
+  "publisher": "did:plc:y5pxyyqttzpf7bo4v6lhjsij",
+  "license": "MIT",
+  "author": { "name": "jammaru" },
+  "security": { "url": "https://github.com/jammaru/emdash-preflight/security/advisories/new" },
+  "name": "EmDash Preflight",
+  "description": "Deterministic publishing policies for every human, API, MCP, agent, and scheduled publish.",
+  "keywords": ["publishing", "policy", "validation", "quality", "agent"],
+  "repo": "https://github.com/jammaru/emdash-preflight",
+  "capabilities": [
+    "hooks.content-policy:register",
+    "content:read",
+    "schema:read",
+    "media:read",
+    "taxonomies:read",
+    "bylines:read",
+  ],
+  "allowedHosts": [],
+  "storage": {
+    "issues": {
+      "indexes": [
+        "collection",
+        "contentId",
+        "severity",
+        "ruleId",
+        ["collection", "contentId"],
+        ["collection", "severity"],
+        ["contentId", "ruleId"],
+      ],
+      "uniqueIndexes": ["issueKey"],
+    },
+  },
+  "admin": {
+    "pages": [{ "path": "/dashboard", "label": "Preflight", "icon": "shield-check" }],
+    "editorPanels": [{ "id": "preflight", "title": "Preflight", "route": "entry-panel" }],
+  },
+  "release": {
+    "requires": { "env:emdash": ">=0.39.0" },
+    "artifacts": {
+      "icon": { "file": "icon.png" },
+    },
+  },
+}

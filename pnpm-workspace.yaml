@@ -1,0 +1,8 @@
+packages:
+  - "."
+
+strictDepBuilds: true
+dangerouslyAllowAllBuilds: false
+allowBuilds:
+  esbuild: true
+  workerd: true
