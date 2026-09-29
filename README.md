@@ -22,6 +22,17 @@ Install **EmDash Preflight** from the EmDash Plugin Registry as `@jammaru.com/pr
 
 After installation, leave Preflight in Observe mode while you configure policies and review the reported issues. Enable Enforce from the Preflight dashboard when the policy is ready to gate publication.
 
+## 日本語での使い方
+
+EmDash管理画面の言語が日本語の場合、Preflightのダッシュボードと記事編集パネルも日本語で表示されます。対応していない言語では英語で表示します。
+
+1. プラグインを有効にしたら、まず **監視（Observe）モード** のまま試します。このモードでは問題を記録しますが、公開や予約は止めません。
+2. ダッシュボードの **サンプル設定を読み込む** を選びます。最初のコレクション用に著者クレジットのチェックが入力されます。内容を確認し、**検証して保存** を選びます。サンプルは読み込んだだけでは保存されません。
+3. 保存済みの記事を開き、編集画面の **Preflight** パネルを確認します。問題を直して記事を保存した後、パネルを開き直すと再チェックします。
+4. ルールが意図どおりだと確認してから **公開ゲート（Enforce）** を有効にします。重大度が `error` の問題だけが公開と予約を止めます。
+
+記事の修正はEmDashの通常の編集画面で行います。Preflightは問題の検出と公開判定を担当し、記事の内容は変更しません。
+
 ## Policy example
 
 Policies are declarative JSON stored in `ctx.settings`. This example checks sponsored posts, image alt text, bylines, categories, and a published content reference:

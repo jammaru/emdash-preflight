@@ -30,6 +30,8 @@ Verified against EmDash's local Node/SQLite demo with the `sandbox-workerd` runn
 - [Editor panel in observe mode](screenshots/preflight-editor-panel-observe.png)
 - [Editor panel in enforce mode](screenshots/preflight-editor-panel-enforce.png)
 - [Blocked publish attempt](screenshots/preflight-publish-blocked.png)
+- [Japanese dashboard](screenshots/preflight-dashboard-ja.png)
+- [Japanese saved-entry panel](screenshots/preflight-editor-panel-ja.png)
 
 ## Repository layout
 

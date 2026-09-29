@@ -7,6 +7,15 @@ import {
   type PluginTestHost,
 } from "@emdash-cms/plugin-test";
 
+import type { PreflightIssue } from "../src/engine/types.js";
+import {
+  getUiLanguage,
+  getUiMessages,
+  localizeIssueMessage,
+  localizePolicyError,
+  severityLabel,
+} from "../src/i18n.js";
+
 let host: PluginTestHost | undefined;
 let runtimeHost: PluginRuntimeTestHost | undefined;
 
@@ -107,6 +116,25 @@ describe("compiled sandbox plugin", () => {
     ).resolves.toMatchObject({ cancel: true });
   });
 
+  it("localizes publication rejection text using the content locale", async () => {
+    host = await createPluginTestHost();
+    await savePolicy("enforce");
+    await expect(
+      host.invokeHook("content:beforePublish", {
+        collection: "posts",
+        content: {
+          id: "post-ja",
+          locale: "ja-JP",
+          data: { sponsored: true },
+        },
+        origin: { source: "visual-editor" },
+      }),
+    ).resolves.toMatchObject({
+      cancel: true,
+      reason: expect.stringContaining("公開前チェックでエラーが1件見つかりました"),
+    });
+  });
+
   it("applies enforce policy to every publication origin", async () => {
     host = await createPluginTestHost();
     await savePolicy("enforce");
@@ -202,6 +230,140 @@ describe("compiled sandbox plugin", () => {
     expect(published).toHaveLength(3);
   });
 
+  it("shows Japanese dashboard guidance and loads an unsaved starter policy", async () => {
+    host = await createPluginTestHost();
+    await host.createCollection({ slug: "posts", label: "Posts" });
+    const japaneseUi = { surface: "admin-page", locale: "ja", direction: "ltr" } as const;
+
+    const dashboard = await host.invokeRoute(
+      "admin",
+      { type: "page_load", page: "/dashboard" },
+      { ui: japaneseUi },
+    );
+    expect(dashboard).toMatchObject({
+      blocks: expect.arrayContaining([
+        expect.objectContaining({ type: "header", text: "使い方" }),
+        expect.objectContaining({
+          type: "section",
+          text: expect.stringContaining("まず監視モードで始めます"),
+        }),
+        expect.objectContaining({ type: "header", text: "利用できるチェック" }),
+      ]),
+    });
+
+    const loaded = await host.invokeRoute(
+      "admin",
+      { type: "block_action", action_id: "load_example" },
+      { ui: japaneseUi },
+    );
+    expect(loaded).toMatchObject({
+      toast: { message: expect.stringContaining("サンプルを入力欄に読み込みました") },
+      blocks: expect.arrayContaining([
+        expect.objectContaining({
+          type: "form",
+          fields: expect.arrayContaining([
+            expect.objectContaining({
+              action_id: "policy_json",
+              initial_value: expect.stringContaining('"byline.required"'),
+            }),
+          ]),
+        }),
+      ]),
+    });
+
+    const englishDashboard = await host.invokeRoute(
+      "admin",
+      { type: "page_load", page: "/dashboard" },
+      { ui: { surface: "admin-page", locale: "en-US", direction: "ltr" } },
+    );
+    expect(englishDashboard).toMatchObject({
+      blocks: expect.arrayContaining([
+        expect.objectContaining({
+          type: "section",
+          text: expect.stringContaining("Start in Observe mode"),
+        }),
+      ]),
+    });
+  });
+
+  it("localizes all rule issues, policy errors, and enforcement guidance for Japanese admins", async () => {
+    expect(getUiLanguage("ja-JP")).toBe("ja");
+    expect(getUiLanguage("en-US")).toBe("en");
+    expect(severityLabel("error", "ja")).toBe("エラー");
+    expect(getUiMessages("ja").blockedInEnforce).toContain("公開ゲートが有効なため");
+
+    const sharedIssue = {
+      severity: "error" as const,
+      collection: "posts",
+      contentId: "post-ja",
+      fingerprint: "issue-ja",
+    };
+    const issues: PreflightIssue[] = [
+      {
+        ...sharedIssue,
+        ruleId: "field.required_when",
+        path: "sponsorName",
+        message: "sponsorName is required when sponsored matches the configured value.",
+        details: { requiredField: "sponsorName", when: { field: "sponsored", equals: true } },
+      },
+      {
+        ...sharedIssue,
+        ruleId: "media.alt.required",
+        path: "featuredImage",
+        message: "Referenced media is missing alt text.",
+      },
+      {
+        ...sharedIssue,
+        ruleId: "media.alt.required",
+        path: "featuredImage",
+        message: "Referenced media could not be found.",
+      },
+      {
+        ...sharedIssue,
+        ruleId: "byline.required",
+        message: "This entry needs at least one byline before publication.",
+      },
+      {
+        ...sharedIssue,
+        ruleId: "taxonomy.min_terms",
+        path: "category",
+        message: "Assign at least 2 category terms before publication.",
+        details: { expectedMinimum: 2, actual: 0 },
+      },
+      {
+        ...sharedIssue,
+        ruleId: "reference.published",
+        path: "featuredArticle",
+        message: "Referenced content does not exist.",
+        details: { targetStatus: null },
+      },
+      {
+        ...sharedIssue,
+        ruleId: "reference.published",
+        path: "featuredArticle",
+        message: "Referenced content must be published before this entry can go live.",
+        details: { targetStatus: "draft" },
+      },
+    ];
+    expect(issues.map((issue) => localizeIssueMessage(issue, "ja-JP"))).toEqual([
+      "「sponsorName」は「sponsored」が条件に一致する場合に必須です。",
+      "参照しているメディアに代替テキスト（alt）がありません。",
+      "参照しているメディアが見つかりませんでした。",
+      "公開する前に著者クレジットを1件以上追加してください。",
+      "公開する前に「category」の用語を最低2件割り当ててください。",
+      "参照先の記事が見つかりませんでした。",
+      "公開する前に、参照先の記事を公開してください。",
+    ]);
+    expect(localizeIssueMessage(issues[0]!, "en-US")).toBe(issues[0]!.message);
+    expect(
+      localizePolicyError(
+        "collections.posts.rules.reference.published",
+        "Active rule requires field and targetCollection.",
+        "ja",
+      ),
+    ).toContain("field（参照項目）、targetCollection（参照先コレクション）");
+  });
+
   it("only describes failing entries as blocked when enforcement is enabled", async () => {
     runtimeHost = await createPluginRuntimeTestHost();
     await runtimeHost.fixtures.collection({ slug: "posts", label: "Posts" });
@@ -232,7 +394,9 @@ describe("compiled sandbox plugin", () => {
       blocks: expect.arrayContaining([
         expect.objectContaining({
           type: "context",
-          text: "Publication is blocked while Preflight is in enforce mode.",
+          text: expect.stringContaining(
+            "Publishing is blocked while Preflight is in Enforce mode.",
+          ),
         }),
       ]),
     });
@@ -243,7 +407,9 @@ describe("compiled sandbox plugin", () => {
       blocks: expect.arrayContaining([
         expect.objectContaining({
           type: "context",
-          text: "Publication is blocked while Preflight is in enforce mode.",
+          text: expect.stringContaining(
+            "Publishing is blocked while Preflight is in Enforce mode.",
+          ),
         }),
       ]),
     });

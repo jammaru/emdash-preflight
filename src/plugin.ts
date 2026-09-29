@@ -16,6 +16,14 @@ import { parseStoredPolicy } from "./policy/migrate.js";
 import { issueCounts, listIssues, listIssuesForRule, persistIssues } from "./storage/issues.js";
 import type { IssueFilters, StoredIssue } from "./storage/issues.js";
 import type { PreflightResult } from "./engine/types.js";
+import {
+  getUiLanguage,
+  getUiMessages,
+  localizeHookReason,
+  localizeIssueMessage,
+  localizePolicyError,
+  severityLabel,
+} from "./i18n.js";
 
 const contentKeySchema = z
   .object({ collection: z.string().min(1).max(64), contentId: z.string().min(1).max(128) })
@@ -132,6 +140,7 @@ function getEventContent(event: ContentPolicyEvent | ContentSchedulePolicyEvent)
   collection: string;
   contentId: string;
   data: Record<string, unknown>;
+  locale?: string;
 } | null {
   const record = event.content;
   if (
@@ -147,6 +156,7 @@ function getEventContent(event: ContentPolicyEvent | ContentSchedulePolicyEvent)
     collection: event.collection,
     contentId: record.id,
     data: record.data as Record<string, unknown>,
+    ...(typeof record.locale === "string" ? { locale: record.locale } : {}),
   };
 }
 
@@ -155,12 +165,12 @@ async function publicationDecision(
   ctx: PluginContext,
 ): Promise<ContentPolicyDecision> {
   const content = getEventContent(event);
+  const locale = content?.locale ?? ctx.site.locale;
   if (!content) {
     ctx.log.error("Preflight received an invalid publication event.");
     return {
       cancel: true,
-      reason:
-        "Preflight could not inspect this entry. Ask an administrator to review the runtime log.",
+      reason: localizeHookReason("invalidCheck", locale),
     };
   }
   const { policy, result } = await evaluateAndPersist(
@@ -172,8 +182,7 @@ async function publicationDecision(
   if (!policy) {
     return {
       cancel: true,
-      reason:
-        "Preflight could not load its policy. Ask an administrator to review Preflight settings.",
+      reason: localizeHookReason("policyLoadError", locale),
     };
   }
   if (policy.mode === "observe") {
@@ -187,15 +196,18 @@ async function publicationDecision(
   if (!result.complete) {
     return {
       cancel: true,
-      reason:
-        "Preflight could not complete the policy check. Review the Preflight panel before publishing.",
+      reason: localizeHookReason("incompletePublish", locale),
     };
   }
   const errors = result.issues.filter((issue) => issue.severity === "error").length;
   if (errors > 0) {
     return {
       cancel: true,
-      reason: `Preflight blocked publication: ${errors} policy error${errors === 1 ? "" : "s"}. Open the Preflight panel for details.`,
+      reason: localizeHookReason(
+        "scheduledAt" in event ? "blockedSchedule" : "blockedPublish",
+        locale,
+        errors,
+      ),
     };
   }
 }
@@ -204,19 +216,20 @@ function policyText(policy: PolicyConfig): string {
   return JSON.stringify(policy, null, 2);
 }
 
-function renderIssue(issue: StoredIssue) {
+function renderIssue(issue: StoredIssue, locale: string) {
   return {
     type: "section" as const,
-    text: `${issue.severity.toUpperCase()} · ${issue.ruleId}\n${issue.message}\n${issue.collection}/${issue.contentId}${issue.path ? ` · ${issue.path}` : ""}`,
+    text: `${severityLabel(issue.severity, locale)} · ${issue.ruleId}\n${localizeIssueMessage(issue, locale)}\n${issue.collection}/${issue.contentId}${issue.path ? ` · ${issue.path}` : ""}`,
   };
 }
 
-function errorBlock(message: string): BlockResponse {
+function errorBlock(message: string, locale: string): BlockResponse {
+  const copy = getUiMessages(locale);
   return {
     blocks: [
       {
         type: "banner",
-        title: "Preflight needs attention",
+        title: copy.needsAttention,
         description: message,
         variant: "error",
       },
@@ -224,51 +237,83 @@ function errorBlock(message: string): BlockResponse {
   };
 }
 
-async function renderDashboard(ctx: PluginContext): Promise<BlockResponse> {
+function examplePolicyText(collection: string): string {
+  return policyText({
+    version: 1,
+    mode: "observe",
+    defaults: {},
+    collections: {
+      [collection]: { rules: { "byline.required": { severity: "error" } } },
+    },
+  });
+}
+
+async function renderDashboard(
+  ctx: PluginContext,
+  locale: string,
+  policyInput?: string,
+): Promise<BlockResponse> {
+  const copy = getUiMessages(locale);
   let policy: PolicyConfig;
   try {
     policy = await loadPolicy(ctx);
   } catch {
-    return errorBlock(
-      "The saved policy is invalid. Correct the policy JSON below before relying on checks.",
-    );
+    return errorBlock(copy.policyInvalid, locale);
   }
   const [counts, recent] = await Promise.all([issueCounts(ctx), listIssues(ctx, { limit: 5 })]);
-  const modeLabel = policy.mode.toUpperCase();
   const blocks: BlockResponse["blocks"] = [
-    { type: "header", text: "EmDash Preflight" },
+    { type: "header", text: copy.dashboardTitle },
     {
       type: "banner",
-      title: `Mode: ${modeLabel}`,
-      description:
-        policy.mode === "observe"
-          ? "Policies are checked and issues are recorded. Publication continues while you review the results."
-          : "Entries with error severity issues are blocked before publication or scheduling.",
+      title: policy.mode === "observe" ? copy.modeObserve : copy.modeEnforce,
+      description: policy.mode === "observe" ? copy.observeDescription : copy.enforceDescription,
       variant: policy.mode === "enforce" ? "alert" : "default",
     },
+    { type: "header", text: copy.gettingStarted },
+    { type: "section", text: copy.stepOne },
+    { type: "section", text: copy.stepTwo },
+    {
+      type: "actions",
+      elements: [
+        {
+          type: "button",
+          action_id: "load_example",
+          label: copy.loadExample,
+          style: "secondary",
+        },
+      ],
+    },
+    { type: "section", text: copy.stepThree },
+    { type: "section", text: copy.stepFour },
+    { type: "header", text: copy.availableRules },
+    { type: "section", text: `field.required_when — ${copy.fieldRequiredDescription}` },
+    { type: "section", text: `media.alt.required — ${copy.mediaAltDescription}` },
+    { type: "section", text: `byline.required — ${copy.bylineDescription}` },
+    { type: "section", text: `taxonomy.min_terms — ${copy.taxonomyDescription}` },
+    { type: "section", text: `reference.published — ${copy.referenceDescription}` },
     {
       type: "stats",
       items: [
-        { label: "Errors", value: counts.errors },
-        { label: "Warnings", value: counts.warnings },
-        { label: "Info", value: counts.info },
+        { label: copy.errors, value: counts.errors },
+        { label: copy.warnings, value: counts.warnings },
+        { label: copy.info, value: counts.info },
       ],
     },
-    { type: "header", text: "Recent issues" },
+    { type: "header", text: copy.recentIssues },
   ];
-  if (recent.items.length) blocks.push(...recent.items.map(renderIssue));
+  if (recent.items.length) blocks.push(...recent.items.map((issue) => renderIssue(issue, locale)));
   else
     blocks.push({
       type: "empty",
-      title: "No open issues",
-      description: "Configure a collection policy below, then run a check or publish an entry.",
+      title: copy.noIssues,
+      description: copy.noIssuesDescription,
     });
   blocks.push(
     { type: "divider" },
-    { type: "header", text: "Policy configuration" },
+    { type: "header", text: copy.policyConfiguration },
     {
       type: "section",
-      text: "Policies are declarative JSON. The editor validates the policy version, rule IDs, and rule-specific options before saving.",
+      text: copy.policyDescription,
     },
     {
       type: "form",
@@ -277,12 +322,12 @@ async function renderDashboard(ctx: PluginContext): Promise<BlockResponse> {
         {
           type: "text_input",
           action_id: "policy_json",
-          label: "Policy JSON",
+          label: copy.policyJson,
           multiline: true,
-          initial_value: policyText(policy),
+          initial_value: policyInput ?? policyText(policy),
         },
       ],
-      submit: { label: "Validate and save", action_id: "save_policy" },
+      submit: { label: copy.savePolicy, action_id: "save_policy" },
     },
     ...(policy.mode === "observe"
       ? [
@@ -292,13 +337,13 @@ async function renderDashboard(ctx: PluginContext): Promise<BlockResponse> {
               {
                 type: "button" as const,
                 action_id: "enable_enforce",
-                label: "Enable enforcement",
+                label: copy.enableEnforce,
                 style: "primary" as const,
                 confirm: {
-                  title: "Enable enforcement?",
-                  text: "Error severity Preflight issues will block publishing and scheduling.",
-                  confirm: "Enable",
-                  deny: "Cancel",
+                  title: copy.enableEnforceTitle,
+                  text: copy.enableEnforceDescription,
+                  confirm: copy.enable,
+                  deny: copy.cancel,
                 },
               },
             ],
@@ -311,7 +356,7 @@ async function renderDashboard(ctx: PluginContext): Promise<BlockResponse> {
               {
                 type: "button" as const,
                 action_id: "disable_enforce",
-                label: "Return to observe mode",
+                label: copy.returnToObserve,
                 style: "secondary" as const,
               },
             ],
@@ -436,31 +481,42 @@ const plugin: SandboxedPlugin = {
     admin: {
       permission: "plugins:manage",
       handler: async (routeCtx, ctx) => {
+        const locale = routeCtx.ui?.locale ?? ctx.site.locale;
+        const copy = getUiMessages(locale);
         const parsed = adminInteractionSchema.safeParse(routeCtx.input);
-        if (!parsed.success) return errorBlock("Preflight received an unsupported page action.");
+        if (!parsed.success) return errorBlock(copy.unsupportedAction, locale);
         const interaction = parsed.data;
         if (interaction.type === "form_submit" && interaction.action_id === "save_policy") {
           const policyJson = interaction.values.policy_json;
-          if (typeof policyJson !== "string") return errorBlock("Policy JSON must be text.");
+          if (typeof policyJson !== "string") return errorBlock(copy.policyJsonMustBeText, locale);
           let decoded: unknown;
           try {
             decoded = JSON.parse(policyJson);
           } catch {
-            return errorBlock("Policy JSON could not be parsed.");
+            return errorBlock(copy.policyJsonParseError, locale);
           }
           const validated = parsePolicyConfig(decoded);
           if (!validated.success) {
             return errorBlock(
-              validated.errors
+              `${copy.policySaveError}\n${validated.errors
                 .slice(0, 3)
-                .map((issue) => `${issue.path || "policy"}: ${issue.message}`)
-                .join("\n"),
+                .map((issue) => localizePolicyError(issue.path, issue.message, locale))
+                .join("\n")}`,
+              locale,
             );
           }
           await ctx.settings.set("policy", validated.data);
           return {
-            ...(await renderDashboard(ctx)),
-            toast: { message: "Policy validated and saved.", type: "success" },
+            ...(await renderDashboard(ctx, locale)),
+            toast: { message: copy.policySaved, type: "success" },
+          };
+        }
+        if (interaction.type === "block_action" && interaction.action_id === "load_example") {
+          const collections = await ctx.schema?.listCollections();
+          const collection = collections?.[0]?.slug ?? "posts";
+          return {
+            ...(await renderDashboard(ctx, locale, examplePolicyText(collection))),
+            toast: { message: copy.exampleLoaded, type: "success" },
           };
         }
         if (
@@ -477,17 +533,28 @@ const plugin: SandboxedPlugin = {
                 : ("observe" as const),
           };
           await ctx.settings.set("policy", next);
+          const modeName =
+            getUiLanguage(locale) === "ja"
+              ? next.mode === "observe"
+                ? "監視"
+                : "公開ゲート"
+              : next.mode;
           return {
-            ...(await renderDashboard(ctx)),
-            toast: { message: `Preflight is now in ${next.mode} mode.`, type: "success" },
+            ...(await renderDashboard(ctx, locale)),
+            toast: {
+              message: copy.modeChanged.replace("{mode}", modeName),
+              type: "success",
+            },
           };
         }
-        return renderDashboard(ctx);
+        return renderDashboard(ctx, locale);
       },
     },
     "entry-panel": {
       permission: "content:read",
       handler: async (routeCtx, ctx) => {
+        const locale = routeCtx.ui?.locale ?? ctx.site.locale;
+        const copy = getUiMessages(locale);
         const parsed = panelInteractionSchema.safeParse(routeCtx.input);
         if (
           !parsed.success ||
@@ -495,43 +562,44 @@ const plugin: SandboxedPlugin = {
           routeCtx.ui.surface !== "content-editor-panel" ||
           !routeCtx.ui.entry
         ) {
-          return errorBlock(
-            "Open Preflight from a saved content entry to check its last saved state.",
-          );
+          return errorBlock(copy.openFromSavedEntry, locale);
         }
         const { collection, id } = routeCtx.ui.entry;
         const check = await runEntryCheck(ctx, collection, id);
-        if (!check) return errorBlock("The saved entry could not be read.");
+        if (!check) return errorBlock(copy.entryReadError, locale);
         const { result, policy } = check;
         const blocks: BlockResponse["blocks"] = [
-          { type: "header", text: "Preflight" },
-          { type: "context", text: `Last saved state · ${collection}/${id}` },
+          { type: "header", text: copy.entryPanelTitle },
+          { type: "context", text: `${copy.savedEntry} · ${collection}/${id}` },
         ];
         if (result.evaluationError)
           blocks.push({
             type: "banner",
-            title: "Check incomplete",
-            description: result.evaluationError.message,
+            title: copy.checkIncomplete,
+            description:
+              result.evaluationError.code === "POLICY_INVALID"
+                ? copy.policyInvalid
+                : copy.checkIncompleteDescription,
             variant: "error",
           });
         else if (result.issues.length === 0)
           blocks.push({
             type: "banner",
-            title: "All enabled policies passed",
-            description: "The saved entry has no open Preflight issues.",
+            title: copy.allPassed,
+            description: copy.allPassedDescription,
             variant: "default",
           });
         else
           blocks.push(
             ...result.issues.map((issue) => ({
               type: "section" as const,
-              text: `${issue.severity.toUpperCase()} · ${issue.ruleId}\n${issue.message}${issue.path ? `\n${issue.path}` : ""}`,
+              text: `${severityLabel(issue.severity, locale)} · ${issue.ruleId}\n${localizeIssueMessage(issue, locale)}${issue.path ? `\n${issue.path}` : ""}`,
             })),
           );
         if (policy?.mode === "enforce" && result.status === "fail" && result.complete)
           blocks.push({
             type: "context",
-            text: "Publication is blocked while Preflight is in enforce mode.",
+            text: copy.blockedInEnforce,
           });
         return { blocks };
       },
