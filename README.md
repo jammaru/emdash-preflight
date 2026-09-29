@@ -1,4 +1,4 @@
-# EmDash Preflight
+﻿# EmDash Preflight
 
 **The publish gate for EmDash.**
 
@@ -20,18 +20,18 @@ Preflight detects problems. Editors and agents use EmDash's normal tools to make
 
 Install **EmDash Preflight** from the EmDash Plugin Registry as `@jammaru.com/preflight`, review the requested capabilities, and enable its MCP tools separately if agents need them. The plugin requires EmDash `>=0.39.0`.
 
-After installation, leave Preflight in Observe mode while you configure policies and review the reported issues. Enable Enforce from the Preflight dashboard when the policy is ready to gate publication.
+After installation, open **Preflight → Rules**. Select a collection and check, fill in the options shown, and save. Keep Observe mode while you review the reported issues. Enable Enforce from the Preflight dashboard when the policy is ready to gate publication. The **JSON** tab is available for bulk edits and shared default rules.
 
 ## 日本語での使い方
 
-EmDash管理画面の言語が日本語の場合、Preflightのダッシュボードと記事編集パネルも日本語で表示されます。対応していない言語では英語で表示します。
+管理画面が日本語の場合、Preflightも日本語で表示されます。
 
-1. プラグインを有効にしたら、まず **監視（Observe）モード** のまま試します。このモードでは問題を記録しますが、公開や予約は止めません。
-2. ダッシュボードの **サンプル設定を読み込む** を選びます。最初のコレクション用に著者クレジットのチェックが入力されます。内容を確認し、**検証して保存** を選びます。サンプルは読み込んだだけでは保存されません。
-3. 保存済みの記事を開き、編集画面の **Preflight** パネルを確認します。問題を直して記事を保存した後、パネルを開き直すと再チェックします。
-4. ルールが意図どおりだと確認してから **公開ゲート（Enforce）** を有効にします。重大度が `error` の問題だけが公開と予約を止めます。
+1. プラグインを有効にし、まず**監視モード**のまま試します。このモードでは問題を記録しますが、公開と予約は止めません。
+2. Preflightの**ルール**タブで対象コレクションとチェック内容を選びます。表示された項目を入力し、**チェックを保存**を選びます。JSONを直接編集する必要はありません。
+3. 保存済みの記事を開き、編集画面の**Preflight**パネルで結果を確認します。記事を修正して保存したら、パネルを開き直して再チェックします。
+4. ルールが意図どおりに働くと確認してから**公開ゲート**を有効にします。重要度が「エラー」の問題だけが公開と予約を止めます。
 
-記事の修正はEmDashの通常の編集画面で行います。Preflightは問題の検出と公開判定を担当し、記事の内容は変更しません。
+共通ルールやポリシー全体の一括編集には**JSON・詳細設定**タブを使えます。MCPツールはEmDash管理者が別途有効にした場合に利用できます。
 
 ## Policy example
 

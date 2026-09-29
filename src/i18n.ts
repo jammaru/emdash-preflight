@@ -14,7 +14,7 @@ const messages = {
     gettingStarted: "Getting started",
     stepOne: "1. Start in Observe mode. It records issues without blocking publishing.",
     stepTwo:
-      "2. Load the starter policy, review the collection and rule, then choose Validate and save.",
+      "2. In Rules, choose a collection and check, complete the shown options, then save the check.",
     stepThree:
       "3. Open a saved entry and use its Preflight panel to check it. Fix the entry in the editor, save it, then reopen the panel.",
     stepFour:
@@ -34,7 +34,7 @@ const messages = {
     recentIssues: "Recent issues",
     noIssues: "No open issues",
     noIssuesDescription:
-      "Load a starter policy, save it, then check a saved entry in the Preflight editor panel.",
+      "Add and save a check in Rules, then inspect a saved entry in its Preflight panel.",
     policyConfiguration: "Policy configuration",
     policyDescription:
       "Policies are JSON rules scoped to collections. The starter policy is a safe example in Observe mode; change the collection or rule to match your site.",
@@ -97,7 +97,7 @@ const messages = {
     gettingStarted: "使い方",
     stepOne: "1. まず監視モードで始めます。問題を記録しますが、公開は止めません。",
     stepTwo:
-      "2. サンプル設定を読み込み、対象コレクションとルールを確認してから「検証して保存」を選びます。",
+      "2. ルールタブで対象コレクションとチェック内容を選び、必要な項目を入力して保存します。",
     stepThree:
       "3. 保存済みの記事を開き、編集画面のPreflightパネルで確認します。記事を直して保存し、パネルを開き直すと再チェックします。",
     stepFour:
@@ -117,7 +117,7 @@ const messages = {
     recentIssues: "最近の問題",
     noIssues: "未解決の問題はありません",
     noIssuesDescription:
-      "サンプル設定を読み込んで保存し、記事編集画面のPreflightパネルで記事をチェックしてください。",
+      "ルールタブでチェックを追加して保存し、記事編集画面のPreflightパネルで記事を確認してください。",
     policyConfiguration: "ルール設定",
     policyDescription:
       "ルールはコレクションごとのJSON設定です。サンプルは監視モードで読み込まれるため、保存しても公開は止まりません。サイトに合わせて対象コレクションやルールを調整してください。",

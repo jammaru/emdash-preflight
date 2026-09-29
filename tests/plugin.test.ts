@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest";
+﻿import { afterEach, describe, expect, it } from "vitest";
 
 import {
   createPluginRuntimeTestHost,
@@ -230,60 +230,81 @@ describe("compiled sandbox plugin", () => {
     expect(published).toHaveLength(3);
   });
 
-  it("shows Japanese dashboard guidance and loads an unsaved starter policy", async () => {
+  it("shows guided Japanese rules and loads an unsaved starter policy", async () => {
     host = await createPluginTestHost();
     await host.createCollection({ slug: "posts", label: "Posts" });
     const japaneseUi = { surface: "admin-page", locale: "ja", direction: "ltr" } as const;
-
     const dashboard = await host.invokeRoute(
       "admin",
       { type: "page_load", page: "/dashboard" },
       { ui: japaneseUi },
     );
-    expect(dashboard).toMatchObject({
-      blocks: expect.arrayContaining([
-        expect.objectContaining({ type: "header", text: "使い方" }),
-        expect.objectContaining({
-          type: "section",
-          text: expect.stringContaining("まず監視モードで始めます"),
-        }),
-        expect.objectContaining({ type: "header", text: "利用できるチェック" }),
-      ]),
-    });
+    const rendered = JSON.stringify(dashboard);
+    expect(rendered).toContain('"action_id":"save_rule"');
+    expect(rendered).toContain('"label":"ルール"');
+    expect(rendered).toContain(getUiMessages("ja").gettingStarted);
 
     const loaded = await host.invokeRoute(
       "admin",
       { type: "block_action", action_id: "load_example" },
       { ui: japaneseUi },
     );
-    expect(loaded).toMatchObject({
-      toast: { message: expect.stringContaining("サンプルを入力欄に読み込みました") },
-      blocks: expect.arrayContaining([
-        expect.objectContaining({
-          type: "form",
-          fields: expect.arrayContaining([
-            expect.objectContaining({
-              action_id: "policy_json",
-              initial_value: expect.stringContaining('"byline.required"'),
-            }),
-          ]),
-        }),
-      ]),
-    });
+    expect(loaded).toMatchObject({ toast: { type: "success" } });
+    expect(JSON.stringify(loaded)).toContain('"byline.required"');
 
     const englishDashboard = await host.invokeRoute(
       "admin",
       { type: "page_load", page: "/dashboard" },
       { ui: { surface: "admin-page", locale: "en-US", direction: "ltr" } },
     );
-    expect(englishDashboard).toMatchObject({
-      blocks: expect.arrayContaining([
-        expect.objectContaining({
-          type: "section",
-          text: expect.stringContaining("Start in Observe mode"),
-        }),
-      ]),
+    expect(JSON.stringify(englishDashboard)).toContain(getUiMessages("en").stepOne);
+  });
+
+  it("adds, edits, and removes a collection rule through the validated admin page", async () => {
+    runtimeHost = await createPluginRuntimeTestHost();
+    await runtimeHost.fixtures.collection({ slug: "posts", label: "Posts" });
+
+    const page = await runtimeHost.admin.loadPage("/dashboard");
+    expect(page.blocks).toEqual(expect.arrayContaining([expect.objectContaining({ type: "tab" })]));
+
+    const invalid = await runtimeHost.admin.submit("/dashboard", "save_rule", {
+      collection: "posts",
+      rule_id: "taxonomy.min_terms",
+      severity: "warning",
+      taxonomy: "category",
+      min: -1,
     });
+    expect(invalid.blocks).toEqual(
+      expect.arrayContaining([expect.objectContaining({ type: "banner", variant: "error" })]),
+    );
+    expect(await runtimeHost.inspect.setting("policy")).toBeNull();
+
+    const saved = await runtimeHost.admin.submit("/dashboard", "save_rule", {
+      collection: "posts",
+      rule_id: "taxonomy.min_terms",
+      severity: "warning",
+      taxonomy: "category",
+      min: 2,
+    });
+    expect(saved.toast).toMatchObject({ type: "success" });
+    expect(await runtimeHost.inspect.setting("policy")).toMatchObject({
+      collections: {
+        posts: {
+          rules: { "taxonomy.min_terms": { severity: "warning", taxonomy: "category", min: 2 } },
+        },
+      },
+    });
+
+    const edited = await runtimeHost.admin.act("/dashboard", "edit_rule", {
+      value: { collection: "posts", ruleId: "taxonomy.min_terms" },
+    });
+    expect(JSON.stringify(edited)).toContain('"initial_value":2');
+
+    const removed = await runtimeHost.admin.act("/dashboard", "remove_rule", {
+      value: { collection: "posts", ruleId: "taxonomy.min_terms" },
+    });
+    expect(removed.toast).toMatchObject({ type: "success" });
+    expect(await runtimeHost.inspect.setting("policy")).toMatchObject({ collections: {} });
   });
 
   it("localizes all rule issues, policy errors, and enforcement guidance for Japanese admins", async () => {

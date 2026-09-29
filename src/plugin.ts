@@ -8,13 +8,23 @@ import type {
 } from "emdash/plugin";
 import { z } from "zod";
 
+import { renderDashboard } from "./admin/dashboard.js";
+import {
+  draftForRule,
+  draftFromValues,
+  policyUiCopy,
+  removeRule,
+  ruleDraftError,
+  upsertRule,
+} from "./admin/policy-ui.js";
 import { evaluatePolicy, makeFailureResult } from "./engine/evaluate.js";
 import { ruleRegistry } from "./engine/registry.js";
+import { isRuleId } from "./engine/types.js";
 import { createRuleContext } from "./emdash/context.js";
 import { parsePolicyConfig, type PolicyConfig } from "./policy/schema.js";
 import { parseStoredPolicy } from "./policy/migrate.js";
-import { issueCounts, listIssues, listIssuesForRule, persistIssues } from "./storage/issues.js";
-import type { IssueFilters, StoredIssue } from "./storage/issues.js";
+import { listIssues, listIssuesForRule, persistIssues } from "./storage/issues.js";
+import type { IssueFilters } from "./storage/issues.js";
 import type { PreflightResult } from "./engine/types.js";
 import {
   getUiLanguage,
@@ -46,6 +56,17 @@ const auditBatchSchema = z
     limit: z.coerce.number().int().min(1).max(25).default(25),
   })
   .strict();
+const ruleFormKeysSchema = z.object({
+  collection: z.string().min(1),
+  rule_id: z.enum([
+    "field.required_when",
+    "media.alt.required",
+    "byline.required",
+    "taxonomy.min_terms",
+    "reference.published",
+  ]),
+  severity: z.enum(["off", "info", "warning", "error"]),
+});
 const adminInteractionSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("page_load"), page: z.string() }),
   z.object({
@@ -212,17 +233,6 @@ async function publicationDecision(
   }
 }
 
-function policyText(policy: PolicyConfig): string {
-  return JSON.stringify(policy, null, 2);
-}
-
-function renderIssue(issue: StoredIssue, locale: string) {
-  return {
-    type: "section" as const,
-    text: `${severityLabel(issue.severity, locale)} · ${issue.ruleId}\n${localizeIssueMessage(issue, locale)}\n${issue.collection}/${issue.contentId}${issue.path ? ` · ${issue.path}` : ""}`,
-  };
-}
-
 function errorBlock(message: string, locale: string): BlockResponse {
   const copy = getUiMessages(locale);
   return {
@@ -238,132 +248,18 @@ function errorBlock(message: string, locale: string): BlockResponse {
 }
 
 function examplePolicyText(collection: string): string {
-  return policyText({
-    version: 1,
-    mode: "observe",
-    defaults: {},
-    collections: {
-      [collection]: { rules: { "byline.required": { severity: "error" } } },
-    },
-  });
-}
-
-async function renderDashboard(
-  ctx: PluginContext,
-  locale: string,
-  policyInput?: string,
-): Promise<BlockResponse> {
-  const copy = getUiMessages(locale);
-  let policy: PolicyConfig;
-  try {
-    policy = await loadPolicy(ctx);
-  } catch {
-    return errorBlock(copy.policyInvalid, locale);
-  }
-  const [counts, recent] = await Promise.all([issueCounts(ctx), listIssues(ctx, { limit: 5 })]);
-  const blocks: BlockResponse["blocks"] = [
-    { type: "header", text: copy.dashboardTitle },
+  return JSON.stringify(
     {
-      type: "banner",
-      title: policy.mode === "observe" ? copy.modeObserve : copy.modeEnforce,
-      description: policy.mode === "observe" ? copy.observeDescription : copy.enforceDescription,
-      variant: policy.mode === "enforce" ? "alert" : "default",
+      version: 1,
+      mode: "observe",
+      defaults: {},
+      collections: {
+        [collection]: { rules: { "byline.required": { severity: "error" } } },
+      },
     },
-    { type: "header", text: copy.gettingStarted },
-    { type: "section", text: copy.stepOne },
-    { type: "section", text: copy.stepTwo },
-    {
-      type: "actions",
-      elements: [
-        {
-          type: "button",
-          action_id: "load_example",
-          label: copy.loadExample,
-          style: "secondary",
-        },
-      ],
-    },
-    { type: "section", text: copy.stepThree },
-    { type: "section", text: copy.stepFour },
-    { type: "header", text: copy.availableRules },
-    { type: "section", text: `field.required_when — ${copy.fieldRequiredDescription}` },
-    { type: "section", text: `media.alt.required — ${copy.mediaAltDescription}` },
-    { type: "section", text: `byline.required — ${copy.bylineDescription}` },
-    { type: "section", text: `taxonomy.min_terms — ${copy.taxonomyDescription}` },
-    { type: "section", text: `reference.published — ${copy.referenceDescription}` },
-    {
-      type: "stats",
-      items: [
-        { label: copy.errors, value: counts.errors },
-        { label: copy.warnings, value: counts.warnings },
-        { label: copy.info, value: counts.info },
-      ],
-    },
-    { type: "header", text: copy.recentIssues },
-  ];
-  if (recent.items.length) blocks.push(...recent.items.map((issue) => renderIssue(issue, locale)));
-  else
-    blocks.push({
-      type: "empty",
-      title: copy.noIssues,
-      description: copy.noIssuesDescription,
-    });
-  blocks.push(
-    { type: "divider" },
-    { type: "header", text: copy.policyConfiguration },
-    {
-      type: "section",
-      text: copy.policyDescription,
-    },
-    {
-      type: "form",
-      block_id: "policy-form",
-      fields: [
-        {
-          type: "text_input",
-          action_id: "policy_json",
-          label: copy.policyJson,
-          multiline: true,
-          initial_value: policyInput ?? policyText(policy),
-        },
-      ],
-      submit: { label: copy.savePolicy, action_id: "save_policy" },
-    },
-    ...(policy.mode === "observe"
-      ? [
-          {
-            type: "actions" as const,
-            elements: [
-              {
-                type: "button" as const,
-                action_id: "enable_enforce",
-                label: copy.enableEnforce,
-                style: "primary" as const,
-                confirm: {
-                  title: copy.enableEnforceTitle,
-                  text: copy.enableEnforceDescription,
-                  confirm: copy.enable,
-                  deny: copy.cancel,
-                },
-              },
-            ],
-          },
-        ]
-      : [
-          {
-            type: "actions" as const,
-            elements: [
-              {
-                type: "button" as const,
-                action_id: "disable_enforce",
-                label: copy.returnToObserve,
-                style: "secondary" as const,
-              },
-            ],
-          },
-        ]),
+    null,
+    2,
   );
-  return { blocks };
 }
 
 async function runEntryCheck(
@@ -486,24 +382,79 @@ const plugin: SandboxedPlugin = {
         const parsed = adminInteractionSchema.safeParse(routeCtx.input);
         if (!parsed.success) return errorBlock(copy.unsupportedAction, locale);
         const interaction = parsed.data;
+        if (interaction.type === "form_submit" && interaction.action_id === "save_rule") {
+          const current = await loadPolicy(ctx);
+          const collections = (await ctx.schema?.listCollections()) ?? [];
+          const fallback = draftForRule(current, collections[0]?.slug ?? "", "byline.required");
+          const draft = draftFromValues(interaction.values, fallback);
+          const ui = policyUiCopy(locale);
+          if (!ruleFormKeysSchema.safeParse(interaction.values).success)
+            return renderDashboard(ctx, locale, { draft, error: ui.invalid });
+          if (!draft.collection || !collections.some((item) => item.slug === draft.collection)) {
+            return renderDashboard(ctx, locale, {
+              draft,
+              error: !draft.collection ? ui.collectionRequired : ui.collectionUnavailable,
+            });
+          }
+          if (
+            draft.ruleId === "reference.published" &&
+            draft.severity !== "off" &&
+            !collections.some((item) => item.slug === draft.targetCollection)
+          )
+            return renderDashboard(ctx, locale, { draft, error: ui.invalidReference });
+          const next = upsertRule(current, draft);
+          if (!next)
+            return renderDashboard(ctx, locale, { draft, error: ruleDraftError(draft, locale) });
+          await ctx.settings.set("policy", next);
+          return {
+            ...(await renderDashboard(ctx, locale, { draft })),
+            toast: { message: ui.saved, type: "success" },
+          };
+        }
+        if (
+          interaction.type === "block_action" &&
+          (interaction.action_id === "edit_rule" || interaction.action_id === "remove_rule")
+        ) {
+          const value = interaction.value;
+          if (!value || typeof value !== "object" || Array.isArray(value))
+            return errorBlock(copy.unsupportedAction, locale);
+          const { collection, ruleId } = value as Record<string, unknown>;
+          if (typeof collection !== "string" || typeof ruleId !== "string" || !isRuleId(ruleId))
+            return errorBlock(copy.unsupportedAction, locale);
+          const current = await loadPolicy(ctx);
+          if (!current.collections[collection]?.rules[ruleId]) return renderDashboard(ctx, locale);
+          if (interaction.action_id === "edit_rule")
+            return renderDashboard(ctx, locale, {
+              draft: draftForRule(current, collection, ruleId),
+            });
+          await ctx.settings.set("policy", removeRule(current, collection, ruleId));
+          return {
+            ...(await renderDashboard(ctx, locale)),
+            toast: { message: policyUiCopy(locale).removed, type: "success" },
+          };
+        }
         if (interaction.type === "form_submit" && interaction.action_id === "save_policy") {
           const policyJson = interaction.values.policy_json;
-          if (typeof policyJson !== "string") return errorBlock(copy.policyJsonMustBeText, locale);
+          if (typeof policyJson !== "string")
+            return renderDashboard(ctx, locale, { error: copy.policyJsonMustBeText });
           let decoded: unknown;
           try {
             decoded = JSON.parse(policyJson);
           } catch {
-            return errorBlock(copy.policyJsonParseError, locale);
+            return renderDashboard(ctx, locale, {
+              policyInput: policyJson,
+              error: copy.policyJsonParseError,
+            });
           }
           const validated = parsePolicyConfig(decoded);
           if (!validated.success) {
-            return errorBlock(
-              `${copy.policySaveError}\n${validated.errors
+            return renderDashboard(ctx, locale, {
+              policyInput: policyJson,
+              error: `${copy.policySaveError}\n${validated.errors
                 .slice(0, 3)
                 .map((issue) => localizePolicyError(issue.path, issue.message, locale))
                 .join("\n")}`,
-              locale,
-            );
+            });
           }
           await ctx.settings.set("policy", validated.data);
           return {
@@ -515,7 +466,7 @@ const plugin: SandboxedPlugin = {
           const collections = await ctx.schema?.listCollections();
           const collection = collections?.[0]?.slug ?? "posts";
           return {
-            ...(await renderDashboard(ctx, locale, examplePolicyText(collection))),
+            ...(await renderDashboard(ctx, locale, { policyInput: examplePolicyText(collection) })),
             toast: { message: copy.exampleLoaded, type: "success" },
           };
         }
