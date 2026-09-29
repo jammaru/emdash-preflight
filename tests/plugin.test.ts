@@ -202,6 +202,53 @@ describe("compiled sandbox plugin", () => {
     expect(published).toHaveLength(3);
   });
 
+  it("only describes failing entries as blocked when enforcement is enabled", async () => {
+    runtimeHost = await createPluginRuntimeTestHost();
+    await runtimeHost.fixtures.collection({ slug: "posts", label: "Posts" });
+    const entry = await runtimeHost.fixtures.content("posts", {
+      data: {},
+      status: "draft",
+    });
+    const observePolicy = {
+      version: 1,
+      mode: "observe",
+      defaults: {},
+      collections: {
+        posts: { rules: { "byline.required": { severity: "error" } } },
+      },
+    } as const;
+    await runtimeHost.fixtures.plugin.setting("policy", observePolicy);
+
+    const observePanel = await runtimeHost.admin.loadEditorPanel("preflight", "posts", entry.id);
+    expect(observePanel).toMatchObject({
+      blocks: expect.arrayContaining([
+        expect.objectContaining({
+          type: "section",
+          text: expect.stringContaining("This entry needs at least one byline before publication."),
+        }),
+      ]),
+    });
+    expect(observePanel).not.toMatchObject({
+      blocks: expect.arrayContaining([
+        expect.objectContaining({
+          type: "context",
+          text: "Publication is blocked while Preflight is in enforce mode.",
+        }),
+      ]),
+    });
+
+    await runtimeHost.fixtures.plugin.setting("policy", { ...observePolicy, mode: "enforce" });
+    const enforcePanel = await runtimeHost.admin.loadEditorPanel("preflight", "posts", entry.id);
+    expect(enforcePanel).toMatchObject({
+      blocks: expect.arrayContaining([
+        expect.objectContaining({
+          type: "context",
+          text: "Publication is blocked while Preflight is in enforce mode.",
+        }),
+      ]),
+    });
+  });
+
   it("rechecks scheduled content when its publish time arrives", async () => {
     runtimeHost = await createPluginRuntimeTestHost();
     await runtimeHost.fixtures.collection({

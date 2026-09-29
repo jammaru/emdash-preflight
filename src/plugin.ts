@@ -325,11 +325,11 @@ async function runEntryCheck(
   ctx: PluginContext,
   collection: string,
   contentId: string,
-): Promise<PreflightResult | null> {
+): Promise<CheckResponse | null> {
   if (!ctx.content) return null;
   const entry = await ctx.content.get(collection, contentId);
   if (!entry) return null;
-  return (await evaluateAndPersist(ctx, collection, contentId, entry.data)).result;
+  return evaluateAndPersist(ctx, collection, contentId, entry.data);
 }
 
 const plugin: SandboxedPlugin = {
@@ -343,9 +343,9 @@ const plugin: SandboxedPlugin = {
       handler: async (routeCtx, ctx) => {
         const parsed = contentKeySchema.safeParse(routeCtx.input);
         if (!parsed.success) return { ok: false, error: { code: "INVALID_INPUT" } };
-        const result = await runEntryCheck(ctx, parsed.data.collection, parsed.data.contentId);
-        return result
-          ? { ok: true, ...result }
+        const check = await runEntryCheck(ctx, parsed.data.collection, parsed.data.contentId);
+        return check
+          ? { ok: true, ...check.result }
           : {
               ok: false,
               error: {
@@ -500,8 +500,9 @@ const plugin: SandboxedPlugin = {
           );
         }
         const { collection, id } = routeCtx.ui.entry;
-        const result = await runEntryCheck(ctx, collection, id);
-        if (!result) return errorBlock("The saved entry could not be read.");
+        const check = await runEntryCheck(ctx, collection, id);
+        if (!check) return errorBlock("The saved entry could not be read.");
+        const { result, policy } = check;
         const blocks: BlockResponse["blocks"] = [
           { type: "header", text: "Preflight" },
           { type: "context", text: `Last saved state · ${collection}/${id}` },
@@ -527,7 +528,7 @@ const plugin: SandboxedPlugin = {
               text: `${issue.severity.toUpperCase()} · ${issue.ruleId}\n${issue.message}${issue.path ? `\n${issue.path}` : ""}`,
             })),
           );
-        if (result.status === "fail" && result.complete)
+        if (policy?.mode === "enforce" && result.status === "fail" && result.complete)
           blocks.push({
             type: "context",
             text: "Publication is blocked while Preflight is in enforce mode.",
