@@ -1,4 +1,5 @@
 import type { BlockResponse } from "@emdash-cms/blocks";
+import type { ZodType } from "zod";
 import type {
   ContentPolicyDecision,
   ContentPolicyEvent,
@@ -6,7 +7,7 @@ import type {
   PluginContext,
   SandboxedPlugin,
 } from "emdash/plugin";
-import { z } from "zod";
+import { z } from "./zod-mini.js";
 
 import { renderDashboard } from "./admin/dashboard.js";
 import {
@@ -35,29 +36,28 @@ import {
   severityLabel,
 } from "./i18n.js";
 
-const contentKeySchema = z
-  .object({ collection: z.string().min(1).max(64), contentId: z.string().min(1).max(128) })
-  .strict();
-const listIssuesSchema = z
-  .object({
-    collection: z.string().min(1).max(64).optional(),
-    contentId: z.string().min(1).max(128).optional(),
-    severity: z.enum(["info", "warning", "error"]).optional(),
-    ruleId: z.string().min(1).max(100).optional(),
-    limit: z.coerce.number().int().min(1).max(100).default(50),
-    cursor: z.string().optional(),
-  })
-  .strict();
-const explainRuleSchema = z.object({ ruleId: z.string().min(1).max(100) }).strict();
-const auditBatchSchema = z
-  .object({
-    collection: z.string().min(1).max(64),
-    cursor: z.string().optional(),
-    limit: z.coerce.number().int().min(1).max(25).default(25),
-  })
-  .strict();
+const boundedString = (min: number, max: number) =>
+  z.string().check(z.minLength(min), z.maxLength(max));
+const contentKeySchema = z.strictObject({
+  collection: boundedString(1, 64),
+  contentId: boundedString(1, 128),
+});
+const listIssuesSchema = z.strictObject({
+  collection: z.optional(boundedString(1, 64)),
+  contentId: z.optional(boundedString(1, 128)),
+  severity: z.optional(z.enum(["info", "warning", "error"])),
+  ruleId: z.optional(boundedString(1, 100)),
+  limit: z._default(z.coerce.number().check(z.int(), z.gte(1), z.lte(100)), 50),
+  cursor: z.optional(z.string()),
+});
+const explainRuleSchema = z.strictObject({ ruleId: boundedString(1, 100) });
+const auditBatchSchema = z.strictObject({
+  collection: boundedString(1, 64),
+  cursor: z.optional(z.string()),
+  limit: z._default(z.coerce.number().check(z.int(), z.gte(1), z.lte(25)), 25),
+});
 const ruleFormKeysSchema = z.object({
-  collection: z.string().min(1),
+  collection: z.string().check(z.minLength(1)),
   rule_id: z.enum([
     "field.required_when",
     "media.alt.required",
@@ -72,7 +72,7 @@ const adminInteractionSchema = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("block_action"),
     action_id: z.string(),
-    value: z.unknown().optional(),
+    value: z.optional(z.unknown()),
   }),
   z.object({
     type: z.literal("form_submit"),
@@ -84,8 +84,8 @@ const panelInteractionSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("panel_load") }),
   z.object({
     type: z.literal("block_action"),
-    action_id: z.string(),
-    value: z.unknown().optional(),
+    action_id: z.literal("recheck"),
+    value: z.optional(z.unknown()),
   }),
   z.object({
     type: z.literal("form_submit"),
@@ -98,6 +98,25 @@ type CheckResponse = {
   result: PreflightResult;
   policy: PolicyConfig | null;
 };
+
+type PublicationGate = {
+  mode: PolicyConfig["mode"] | null;
+  action: "allow" | "block";
+  errorCount: number;
+};
+
+function publicationGate(check: CheckResponse): PublicationGate {
+  const errorCount = check.result.issues.filter((issue) => issue.severity === "error").length;
+  return {
+    mode: check.policy?.mode ?? null,
+    action:
+      !check.policy ||
+      (check.policy.mode === "enforce" && (!check.result.complete || errorCount > 0))
+        ? "block"
+        : "allow",
+    errorCount,
+  };
+}
 
 async function loadPolicy(ctx: PluginContext): Promise<PolicyConfig> {
   return parseStoredPolicy(await ctx.settings.get<unknown>("policy"));
@@ -270,7 +289,38 @@ async function runEntryCheck(
   if (!ctx.content) return null;
   const entry = await ctx.content.get(collection, contentId);
   if (!entry) return null;
-  return evaluateAndPersist(ctx, collection, contentId, entry.data);
+  if (!entry.draftRevisionId) return evaluateAndPersist(ctx, collection, contentId, entry.data);
+
+  try {
+    const revision = await ctx.content.getRevision?.(collection, contentId, entry.draftRevisionId);
+    if (revision) return evaluateAndPersist(ctx, collection, contentId, revision.data);
+  } catch (error) {
+    ctx.log.error(
+      "Preflight could not read the saved draft revision.",
+      error instanceof Error ? { message: error.message } : undefined,
+    );
+  }
+
+  let policy: PolicyConfig | null = null;
+  try {
+    policy = await loadPolicy(ctx);
+  } catch (error) {
+    ctx.log.error(
+      "Preflight policy configuration is invalid.",
+      error instanceof Error ? { message: error.message } : undefined,
+    );
+  }
+  return {
+    policy,
+    result: makeFailureResult({
+      collection,
+      contentId,
+      code: policy ? "CHECK_INCOMPLETE" : "POLICY_INVALID",
+      message: policy
+        ? "Preflight could not read the latest saved draft revision. Ask an administrator to review the plugin configuration."
+        : "Preflight could not load the policy configuration. Ask an administrator to review Preflight settings.",
+    }),
+  };
 }
 
 const plugin: SandboxedPlugin = {
@@ -286,7 +336,7 @@ const plugin: SandboxedPlugin = {
         if (!parsed.success) return { ok: false, error: { code: "INVALID_INPUT" } };
         const check = await runEntryCheck(ctx, parsed.data.collection, parsed.data.contentId);
         return check
-          ? { ok: true, ...check.result }
+          ? { ok: true, ...check.result, gate: publicationGate(check) }
           : {
               ok: false,
               error: {
@@ -519,9 +569,25 @@ const plugin: SandboxedPlugin = {
         const check = await runEntryCheck(ctx, collection, id);
         if (!check) return errorBlock(copy.entryReadError, locale);
         const { result, policy } = check;
+        const gate = publicationGate(check);
+        const errorCount = gate.errorCount;
         const blocks: BlockResponse["blocks"] = [
           { type: "header", text: copy.entryPanelTitle },
           { type: "context", text: `${copy.savedEntry} · ${collection}/${id}` },
+          {
+            type: "stats",
+            items: [
+              { label: copy.errors, value: errorCount },
+              {
+                label: copy.warnings,
+                value: result.issues.filter((issue) => issue.severity === "warning").length,
+              },
+              {
+                label: copy.info,
+                value: result.issues.filter((issue) => issue.severity === "info").length,
+              },
+            ],
+          },
         ];
         if (result.evaluationError)
           blocks.push({
@@ -530,28 +596,56 @@ const plugin: SandboxedPlugin = {
             description:
               result.evaluationError.code === "POLICY_INVALID"
                 ? copy.policyInvalid
-                : copy.checkIncompleteDescription,
+                : gate.action === "block"
+                  ? copy.incompleteEnforceDescription
+                  : copy.incompleteObserveDescription,
             variant: "error",
           });
-        else if (result.issues.length === 0)
+        else if (gate.action === "block")
+          blocks.push({
+            type: "banner",
+            title: copy.publishBlocked,
+            description: copy.blockedInEnforce,
+            variant: "error",
+          });
+        else if (result.issues.length > 0)
+          blocks.push({
+            type: "banner",
+            title: copy.issuesFound.replace("{count}", String(result.issues.length)),
+            description:
+              policy?.mode === "observe"
+                ? copy.observeIssuesDescription
+                : copy.warningOnlyDescription,
+            variant: "alert",
+          });
+        else
           blocks.push({
             type: "banner",
             title: copy.allPassed,
-            description: copy.allPassedDescription,
+            description:
+              policy?.mode === "observe"
+                ? copy.allPassedObserveDescription
+                : copy.allPassedEnforceDescription,
             variant: "default",
           });
-        else
+        if (result.issues.length > 0)
           blocks.push(
             ...result.issues.map((issue) => ({
               type: "section" as const,
               text: `${severityLabel(issue.severity, locale)} · ${issue.ruleId}\n${localizeIssueMessage(issue, locale)}${issue.path ? `\n${issue.path}` : ""}`,
             })),
           );
-        if (policy?.mode === "enforce" && result.status === "fail" && result.complete)
-          blocks.push({
-            type: "context",
-            text: copy.blockedInEnforce,
-          });
+        blocks.push({
+          type: "actions",
+          elements: [
+            {
+              type: "button",
+              action_id: "recheck",
+              label: copy.recheckSavedEntry,
+              style: "secondary",
+            },
+          ],
+        });
         return { blocks };
       },
     },
@@ -559,30 +653,31 @@ const plugin: SandboxedPlugin = {
   mcp: {
     tools: {
       check_entry: {
-        description: "Evaluate the configured Preflight policies for one saved EmDash entry.",
+        description:
+          "Before publishing or scheduling any saved EmDash entry, call preflight__check_entry with its collection slug and content ID. This checks the latest saved version and returns complete, issues, and gate. gate.action is this plugin's publish-hook decision (allow or block); gate.mode is observe or enforce. If complete is false, do not treat status: pass as a successful check. If gate.action is block, fix the error findings with normal EmDash content tools, save the entry, and call preflight__check_entry again. In Observe mode, findings are recorded and this plugin allows publishing. After reviewing the result, use EmDash's normal publish or schedule tool; this tool never publishes or edits content.",
         route: "check-entry",
-        input: contentKeySchema,
+        input: contentKeySchema as unknown as ZodType,
         destructive: false,
       },
       list_issues: {
         description:
           "List stored Preflight issues using optional collection, entry, severity, and rule filters.",
         route: "issues/list",
-        input: listIssuesSchema,
+        input: listIssuesSchema as unknown as ZodType,
         destructive: false,
       },
       explain_rule: {
         description:
           "Explain a Preflight rule, its active configuration, and the stored entries that currently fail it.",
         route: "rules/explain",
-        input: explainRuleSchema,
+        input: explainRuleSchema as unknown as ZodType,
         destructive: false,
       },
       audit_batch: {
         description:
           "Audit up to 25 published entries per invocation with a cursor; call again with nextCursor to continue.",
         route: "audit/batch",
-        input: auditBatchSchema,
+        input: auditBatchSchema as unknown as ZodType,
         destructive: false,
       },
     },

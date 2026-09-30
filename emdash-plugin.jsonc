@@ -12,6 +12,7 @@
   "capabilities": [
     "hooks.content-policy:register",
     "content:read",
+    "content:revisions:read",
     "schema:read",
     "media:read",
     "taxonomies:read",

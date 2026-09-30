@@ -46,4 +46,4 @@ The plugin uses `ctx.settings` for versioned policy data and one indexed `issues
 
 ## Admin and agents
 
-The dashboard and saved-entry panel return host-rendered Block Kit. The panel reads the saved entry identified by host-attested `routeCtx.ui`; it does not receive unsaved editor values. MCP tools expose structured results, issue pages, rule explanations, and cursor-based audit. Agents fix content using normal EmDash tools, then recheck.
+The dashboard and saved-entry panel return host-rendered Block Kit. The panel reads the entry identified by host-attested `routeCtx.ui`, then checks its current saved `draftRevisionId` when one exists; it does not receive unsaved editor values. Its result shows issue counts, whether this plugin will block publishing, and an explicit saved-entry recheck action. MCP tool descriptions tell agents to call `preflight__check_entry` before publishing or scheduling and explain how to interpret `complete` and `gate`. The check result reports this plugin's mode, allow/block decision, and error count. Agents fix content using normal EmDash tools, save, and check again before calling EmDash's normal publish or schedule tool.

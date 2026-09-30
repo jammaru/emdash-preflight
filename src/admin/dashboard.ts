@@ -57,6 +57,7 @@ export async function renderDashboard(
     { type: "section", text: copy.stepTwo },
     { type: "section", text: copy.stepThree },
     { type: "section", text: copy.stepFour },
+    { type: "section", text: copy.stepFive },
   ];
   const blocks: BlockResponse["blocks"] = [
     { type: "header", text: copy.dashboardTitle },

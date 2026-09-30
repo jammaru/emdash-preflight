@@ -16,9 +16,11 @@ const messages = {
     stepTwo:
       "2. In Rules, choose a collection and check, complete the shown options, then save the check.",
     stepThree:
-      "3. Open a saved entry and use its Preflight panel to check it. Fix the entry in the editor, save it, then reopen the panel.",
+      "3. Open a saved entry and use its Preflight panel to check it. Fix the entry in the editor, save it, then choose Check saved entry again.",
     stepFour:
       "4. Enable Enforce only after the rules look right. Only issues with error severity block publishing and scheduling.",
+    stepFive:
+      "5. To let agents run checks before publishing, enable this plugin's MCP tools in Plugins. Agents can then call preflight__check_entry.",
     loadExample: "Load starter policy",
     exampleLoaded:
       "Starter policy loaded into the editor. Review the collection and rule, then validate and save it.",
@@ -63,12 +65,24 @@ const messages = {
     entryReadError: "The saved entry could not be read.",
     savedEntry: "Last saved state",
     checkIncomplete: "Check incomplete",
-    checkIncompleteDescription:
-      "Preflight could not complete every enabled check. Review the runtime log before relying on this result.",
+    incompleteEnforceDescription:
+      "Not every enabled check finished. Enforce mode blocks publishing when a check is incomplete. Resolve the check or ask an administrator, then check again.",
+    incompleteObserveDescription:
+      "Not every enabled check finished. Observe mode allows publishing, but this is not a passing result. Resolve the check or ask an administrator, then check again.",
+    publishBlocked: "Preflight will block publishing",
+    issuesFound: "Found {count} Preflight issue(s)",
+    observeIssuesDescription:
+      "Observe mode records findings and allows publishing. Fix these issues, save the entry, then check again for an updated result.",
+    warningOnlyDescription:
+      "No error-severity issue was found. Warnings and information do not block publishing in Enforce mode. Save any changes and check again.",
     allPassed: "All enabled policies passed",
-    allPassedDescription: "The saved entry has no open Preflight issues.",
+    allPassedObserveDescription:
+      "No configured issues were found. Observe mode records findings but does not block publishing.",
+    allPassedEnforceDescription:
+      "No policy errors were found. Preflight will allow publishing. Save any edits before publishing.",
     blockedInEnforce:
-      "Publishing is blocked while Preflight is in Enforce mode. Fix the issues and save the entry, or return to Observe mode.",
+      "Fix the error issues below, save the entry, then check it again. Publishing stays blocked until the errors are resolved.",
+    recheckSavedEntry: "Check saved entry again",
     genericIssue: "This check did not pass. Review the rule settings and the saved entry.",
     invalidCheck:
       "Preflight could not inspect this entry. Ask an administrator to review the runtime log.",
@@ -99,9 +113,11 @@ const messages = {
     stepTwo:
       "2. ルールタブで対象コレクションとチェック内容を選び、必要な項目を入力して保存します。",
     stepThree:
-      "3. 保存済みの記事を開き、編集画面のPreflightパネルで確認します。記事を直して保存し、パネルを開き直すと再チェックします。",
+      "3. 保存済みの記事を開き、編集画面のPreflightパネルで確認します。記事を直して保存したら「保存済みの記事を再チェック」を選びます。",
     stepFour:
       "4. ルールが意図どおりだと確認してから公開ゲートを有効にします。「エラー」の問題だけが公開・予約を止めます。",
+    stepFive:
+      "5. Agentにも公開前チェックを使わせるには、プラグイン画面でこのプラグインのMCPツールを有効にします。Agentは preflight__check_entry を呼び出せます。",
     loadExample: "サンプル設定を読み込む",
     exampleLoaded:
       "サンプルを入力欄に読み込みました。対象コレクションとルールを確認し、検証して保存してください。",
@@ -145,12 +161,24 @@ const messages = {
     entryReadError: "保存済みの記事を読み取れませんでした。",
     savedEntry: "保存済みの記事をチェック",
     checkIncomplete: "チェック未完了",
-    checkIncompleteDescription:
-      "有効なチェックをすべて完了できませんでした。結果を判断する前に実行ログを確認してください。",
+    incompleteEnforceDescription:
+      "有効なチェックをすべて完了できませんでした。公開ゲート有効中は、チェック未完了でも公開できません。設定や実行ログを確認し、もう一度チェックしてください。",
+    incompleteObserveDescription:
+      "有効なチェックをすべて完了できませんでした。監視モードでは公開は止まりませんが、合格とは判断できません。設定や実行ログを確認してください。",
+    publishBlocked: "Preflightが公開を止めます",
+    issuesFound: "Preflightの問題が{count}件見つかりました",
+    observeIssuesDescription:
+      "監視モードでは問題を記録しますが、公開は止めません。記事を修正して保存した後、再チェックしてください。",
+    warningOnlyDescription:
+      "公開を止める「エラー」はありません。公開ゲート有効中も警告と情報は公開を止めません。修正して保存したら再チェックしてください。",
     allPassed: "有効なルールをすべて通過しました",
-    allPassedDescription: "保存済みの記事に未解決のPreflight問題はありません。",
+    allPassedObserveDescription:
+      "有効なルールに問題はありません。監視モードではチェック結果を記録しますが、公開は止めません。",
+    allPassedEnforceDescription:
+      "公開を止めるルール違反はありません。保存済みの編集内容を公開できます。",
     blockedInEnforce:
-      "公開ゲートが有効なため、公開できません。問題を直して記事を保存するか、監視モードに戻してください。",
+      "下のエラーを修正して記事を保存し、もう一度チェックしてください。エラーが解消するまで公開は止まります。",
+    recheckSavedEntry: "保存済みの記事を再チェック",
     genericIssue: "このチェックに通りませんでした。ルール設定と保存済みの記事を確認してください。",
     invalidCheck: "記事をチェックできませんでした。管理者に実行ログの確認を依頼してください。",
     policyLoadError:

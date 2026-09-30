@@ -79,19 +79,28 @@ See [docs/rules.md](docs/rules.md) for rule details and [docs/architecture.md](d
 
 Preflight exposes four non-destructive tools after an EmDash administrator enables the plugin's MCP surface:
 
-- `preflight__check_entry` evaluates a saved entry.
+- `preflight__check_entry` checks the latest saved entry and reports whether Preflight will allow or block a publish attempt.
 - `preflight__list_issues` lists stored issues with collection, entry, severity, and rule filters.
 - `preflight__explain_rule` returns a rule's purpose, active configuration, and current findings.
 - `preflight__audit_batch` checks up to 25 published entries per call using a cursor; pass `nextCursor` to continue.
 
-Agents should fix issues through standard EmDash content tools, then call `check_entry` again.
+### Before an agent publishes
+
+1. Read the saved entry with the normal EmDash content tools to get its collection slug and content ID.
+2. Call `preflight__check_entry` before using EmDash's publish or schedule tool.
+3. Check `complete`, `issues`, and `gate`. If `complete` is false, do not treat the result as a pass; resolve the incomplete check or ask an administrator. If `gate.action` is `block` because of error findings, fix them with normal EmDash content tools.
+4. Save the entry and call `preflight__check_entry` again. In Observe mode, findings are recorded but this plugin allows publishing. In Enforce mode, errors and incomplete checks block publishing. After reviewing the result, use EmDash's normal publish or schedule tool.
+
+The `gate` field describes this plugin's decision only; EmDash's other publishing rules and permissions still apply. The check tool reads the latest saved version and never publishes or edits content. Administrators can enable the plugin's MCP tools from the Plugins area. The dashboard's Rules tab also shows the exact check tool name and setup step.
 
 ## Permissions and security
 
 Preflight requests these EmDash capabilities:
 
 - `hooks.content-policy:register` to inspect and reject publish or schedule actions.
-- `content:read`, `schema:read`, `media:read`, `taxonomies:read`, and `bylines:read` for policy evaluation and saved-entry checks.
+- `content:read` to read entries and referenced content.
+- `content:revisions:read` to check the current saved draft revision when an entry has one; Preflight does not enumerate historical revisions.
+- `schema:read`, `media:read`, `taxonomies:read`, and `bylines:read` for rule configuration and policy evaluation.
 
 Preflight has no outbound network permission, no allowed hosts, no content or media write permission, no publication authority, and no user-directory access. It does not send content to an AI provider or external service. Its only persistent data is policy configuration and a small indexed issue collection owned by the plugin.
 

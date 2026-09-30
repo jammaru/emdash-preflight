@@ -48,6 +48,9 @@ const labels = {
     warning: "Warning",
     error: "Error · blocks in Enforce mode",
     ruleGuide: "What each check does",
+    agentToolTitle: "Let agents run the check before publishing",
+    agentToolDescription:
+      "Enable this plugin's MCP tools in Plugins. Agent tools will then show preflight__check_entry, which checks the latest saved entry and reports whether Preflight will block it.",
     fieldRule:
       "Conditional required field · require a field when another field has a chosen value.",
     mediaRule: "Media alt text · check alt text on one or two media fields.",
@@ -110,6 +113,9 @@ const labels = {
     warning: "警告",
     error: "エラー・公開ゲートで停止",
     ruleGuide: "チェック内容の説明",
+    agentToolTitle: "Agentにも公開前チェックを使わせる",
+    agentToolDescription:
+      "プラグイン画面でこのプラグインのMCPツールを有効にしてください。Agentのツール一覧に preflight__check_entry が表示され、保存済みの記事を公開前にチェックできます。",
     fieldRule: "条件付き必須項目：別の項目が指定値のとき、項目を必須にします。",
     mediaRule: "メディアの代替テキスト：1〜2個のメディア項目のaltを確認します。",
     bylineRule: "著者クレジット：著者を1人以上求めます。",
@@ -397,6 +403,12 @@ export async function renderPolicyRules(
     },
   ];
   return [
+    {
+      type: "banner",
+      title: copy.agentToolTitle,
+      description: copy.agentToolDescription,
+      variant: "default",
+    },
     { type: "header", text: copy.configured },
     rows.length
       ? {
