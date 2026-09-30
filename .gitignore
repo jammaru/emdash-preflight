@@ -1,3 +1,4 @@
 node_modules/
 dist/
 video/launch/
+video/*.mp4
