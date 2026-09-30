@@ -6,12 +6,13 @@ EmDash Preflight runs as a sandboxed plugin and asks only for capabilities used 
 | ------------------------------- | ------------------------------------------------------------------------------------- |
 | `hooks.content-policy:register` | Inspect publish and schedule events and reject them when Enforce mode finds an error. |
 | `content:read`                  | Check saved entries, references, and entry panels.                                    |
+| `content:revisions:read`        | Read only the current `draftRevisionId` so checks include the latest saved draft.     |
 | `schema:read`                   | Provide collection and field information to policy tooling.                           |
 | `media:read`                    | Read ready-media metadata, including alt text.                                        |
 | `taxonomies:read`               | Read assigned taxonomy terms.                                                         |
 | `bylines:read`                  | Read byline credits for an entry.                                                     |
 
-The manifest has an empty `allowedHosts` list and requests no network capability. It does not request `content:write`, `content:publish`, media writes, user access, revision access, or AI access. Preflight cannot edit or publish site content.
+The manifest has an empty `allowedHosts` list and requests no network capability. Preflight uses the revision read capability only to resolve the content row's current `draftRevisionId`; it does not enumerate historical revisions. It does not request `content:write`, `content:publish`, media writes, user access, or AI access. Preflight cannot edit or publish site content.
 
 Policy settings and stored issues remain inside the EmDash installation. The evaluator is deterministic and uses no LLM or external service. MCP tools are explicitly marked non-destructive and require separate administrator enablement in EmDash.
 

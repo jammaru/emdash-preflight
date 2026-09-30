@@ -37,6 +37,14 @@ describe("field.required_when", () => {
       ),
     ).resolves.toEqual([]);
   });
+  it("matches boolean conditions when persisted values are represented as 1 or 0", async () => {
+    await expect(
+      requiredWhenRule.evaluate(makeContext({ sponsored: 1 }), options),
+    ).resolves.toMatchObject([{ path: "sponsor.name" }]);
+    await expect(
+      requiredWhenRule.evaluate(makeContext({ sponsored: 0 }), options),
+    ).resolves.toEqual([]);
+  });
   it("reports a missing nested value with the configured severity", async () => {
     await expect(
       requiredWhenRule.evaluate(makeContext({ sponsored: true, sponsor: { name: " " } }), options),

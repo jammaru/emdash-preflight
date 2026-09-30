@@ -56,11 +56,12 @@ async function savePolicy(mode: "observe" | "enforce") {
 describe("compiled sandbox plugin", () => {
   it("keeps its declared capabilities read-only and network-free", async () => {
     host = await createPluginTestHost();
-    expect(host.manifest.capabilities).toHaveLength(6);
+    expect(host.manifest.capabilities).toHaveLength(7);
     expect(host.manifest.capabilities).toEqual(
       expect.arrayContaining([
         "hooks.content-policy:register",
         "content:read",
+        "content:revisions:read",
         "schema:read",
         "media:read",
         "taxonomies:read",
@@ -68,6 +69,47 @@ describe("compiled sandbox plugin", () => {
       ]),
     );
     expect(host.manifest.allowedHosts).toEqual([]);
+  });
+
+  it("advertises the saved-entry check as a pre-publish MCP workflow", async () => {
+    host = await createPluginTestHost();
+    const tool = host.manifest.mcp?.tools.find((item) => item.name === "check_entry");
+
+    expect(tool?.description).toContain("Before publishing or scheduling");
+    expect(tool?.description).toContain("preflight__check_entry");
+    expect(tool?.description).toContain("gate.action");
+    expect(tool?.description).toContain("normal EmDash content tools");
+  });
+
+  it("reports that Observe mode records issues without blocking the agent's publish", async () => {
+    runtimeHost = await createPluginRuntimeTestHost();
+    await runtimeHost.fixtures.collection({ slug: "posts", label: "Posts" });
+    await runtimeHost.fixtures.plugin.setting("policy", {
+      version: 1,
+      mode: "observe",
+      defaults: {},
+      collections: {
+        posts: { rules: { "byline.required": { severity: "error" } } },
+      },
+    });
+    const entry = await runtimeHost.fixtures.content("posts", {
+      slug: "observe-mode-check",
+      data: {},
+      status: "draft",
+    });
+
+    await expect(
+      runtimeHost.transport.invokeRoute("check-entry", {
+        collection: "posts",
+        contentId: entry.id,
+      }),
+    ).resolves.toMatchObject({
+      ok: true,
+      status: "fail",
+      complete: true,
+      gate: { mode: "observe", action: "allow", errorCount: 1 },
+      issues: [expect.objectContaining({ ruleId: "byline.required" })],
+    });
   });
 
   it("records issues but allows publication in observe mode", async () => {
@@ -230,6 +272,101 @@ describe("compiled sandbox plugin", () => {
     expect(published).toHaveLength(3);
   });
 
+  it("checks, blocks, rechecks, and publishes a saved entry through the runtime", async () => {
+    runtimeHost = await createPluginRuntimeTestHost();
+    await runtimeHost.fixtures.collection({
+      slug: "posts",
+      label: "Posts",
+      fields: [
+        { slug: "sponsored", label: "Sponsored", type: "boolean" },
+        { slug: "sponsor_name", label: "Sponsor name", type: "string" },
+      ],
+    });
+    const configured = await runtimeHost.admin.submit("/dashboard", "save_policy", {
+      policy_json: JSON.stringify({
+        version: 1,
+        mode: "enforce",
+        defaults: {},
+        collections: {
+          posts: {
+            rules: {
+              "field.required_when": {
+                severity: "error",
+                when: { field: "sponsored", equals: true },
+                require: "sponsor_name",
+              },
+            },
+          },
+        },
+      }),
+    });
+    expect(configured.toast).toMatchObject({ type: "success" });
+
+    const entry = await runtimeHost.fixtures.content("posts", {
+      slug: "preflight-agent-workflow",
+      data: { sponsored: true },
+      status: "draft",
+    });
+    const tool = runtimeHost.manifest.mcp?.tools.find((item) => item.name === "check_entry");
+    expect(tool?.description).toContain("preflight__check_entry");
+
+    const checked = await runtimeHost.transport.invokeRoute("check-entry", {
+      collection: "posts",
+      contentId: entry.id,
+    });
+    expect(checked).toMatchObject({
+      ok: true,
+      status: "fail",
+      complete: true,
+      gate: { mode: "enforce", action: "block", errorCount: 1 },
+      issues: [expect.objectContaining({ ruleId: "field.required_when", path: "sponsor_name" })],
+    });
+
+    const firstPanel = await runtimeHost.admin.loadEditorPanel("preflight", "posts", entry.id);
+    expect(JSON.stringify(firstPanel)).toContain("Preflight will block publishing");
+    expect(JSON.stringify(firstPanel)).toContain("Check saved entry again");
+
+    const rejected = await runtimeHost.actions.content.publish("posts", entry.id);
+    expect(rejected).toMatchObject({ success: false });
+    await expect(runtimeHost.inspect.content.get("posts", entry.id)).resolves.toMatchObject({
+      status: "draft",
+    });
+
+    const saved = await runtimeHost.actions.content.update("posts", entry.id, {
+      data: { sponsored: true, sponsor_name: "Example" },
+    });
+    expect(saved).toMatchObject({ success: true });
+    await expect(runtimeHost.inspect.content.get("posts", entry.id)).resolves.toMatchObject({
+      draftRevisionId: expect.any(String),
+    });
+
+    const recheckedPanel = await runtimeHost.admin.actEditorPanel(
+      "preflight",
+      "posts",
+      entry.id,
+      "recheck",
+    );
+    expect(JSON.stringify(recheckedPanel)).toContain("All enabled policies passed");
+
+    const rechecked = await runtimeHost.transport.invokeRoute("check-entry", {
+      collection: "posts",
+      contentId: entry.id,
+    });
+    expect(rechecked).toMatchObject({
+      ok: true,
+      status: "pass",
+      complete: true,
+      gate: { mode: "enforce", action: "allow", errorCount: 0 },
+      issues: [],
+    });
+
+    const published = await runtimeHost.actions.content.publish("posts", entry.id);
+    expect(published).toMatchObject({ success: true });
+    await expect(runtimeHost.inspect.content.get("posts", entry.id)).resolves.toMatchObject({
+      status: "published",
+    });
+  });
+
   it("shows guided Japanese rules and loads an unsaved starter policy", async () => {
     host = await createPluginTestHost();
     await host.createCollection({ slug: "posts", label: "Posts" });
@@ -243,6 +380,7 @@ describe("compiled sandbox plugin", () => {
     expect(rendered).toContain('"action_id":"save_rule"');
     expect(rendered).toContain('"label":"ルール"');
     expect(rendered).toContain(getUiMessages("ja").gettingStarted);
+    expect(rendered).toContain("preflight__check_entry");
 
     const loaded = await host.invokeRoute(
       "admin",
@@ -257,7 +395,9 @@ describe("compiled sandbox plugin", () => {
       { type: "page_load", page: "/dashboard" },
       { ui: { surface: "admin-page", locale: "en-US", direction: "ltr" } },
     );
-    expect(JSON.stringify(englishDashboard)).toContain(getUiMessages("en").stepOne);
+    const englishRendered = JSON.stringify(englishDashboard);
+    expect(englishRendered).toContain(getUiMessages("en").stepOne);
+    expect(englishRendered).toContain(getUiMessages("en").stepFive);
   });
 
   it("adds, edits, and removes a collection rule through the validated admin page", async () => {
@@ -311,7 +451,7 @@ describe("compiled sandbox plugin", () => {
     expect(getUiLanguage("ja-JP")).toBe("ja");
     expect(getUiLanguage("en-US")).toBe("en");
     expect(severityLabel("error", "ja")).toBe("エラー");
-    expect(getUiMessages("ja").blockedInEnforce).toContain("公開ゲートが有効なため");
+    expect(getUiMessages("ja").blockedInEnforce).toContain("エラーを修正して記事を保存");
 
     const sharedIssue = {
       severity: "error" as const,
@@ -414,10 +554,8 @@ describe("compiled sandbox plugin", () => {
     expect(observePanel).not.toMatchObject({
       blocks: expect.arrayContaining([
         expect.objectContaining({
-          type: "context",
-          text: expect.stringContaining(
-            "Publishing is blocked while Preflight is in Enforce mode.",
-          ),
+          type: "banner",
+          title: "Preflight will block publishing",
         }),
       ]),
     });
@@ -427,10 +565,8 @@ describe("compiled sandbox plugin", () => {
     expect(enforcePanel).toMatchObject({
       blocks: expect.arrayContaining([
         expect.objectContaining({
-          type: "context",
-          text: expect.stringContaining(
-            "Publishing is blocked while Preflight is in Enforce mode.",
-          ),
+          type: "banner",
+          title: "Preflight will block publishing",
         }),
       ]),
     });

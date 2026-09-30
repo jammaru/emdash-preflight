@@ -1,36 +1,34 @@
-import { z } from "zod";
+import { z } from "../zod-mini.js";
 
 import { isRuleId, RULE_IDS, type RuleId, type RuleOptions } from "../engine/types.js";
 
-const settingsSchema = z
-  .object({
-    severity: z.enum(["off", "info", "warning", "error"]),
-    when: z
-      .object({ field: z.string().min(1), equals: z.unknown() })
-      .strict()
-      .optional(),
-    require: z.string().min(1).optional(),
-    fields: z.array(z.string().min(1)).max(2).optional(),
-    taxonomy: z.string().min(1).optional(),
-    min: z.number().int().min(0).max(100).optional(),
-    field: z.string().min(1).optional(),
-    targetCollection: z.string().min(1).optional(),
-  })
-  .strict();
+const nonEmptyString = z.string().check(z.minLength(1));
 
-const rawPolicySchema = z
-  .object({
-    version: z.literal(1),
-    mode: z.enum(["observe", "enforce"]),
-    defaults: z.record(z.string(), z.unknown()).default({}),
-    collections: z
-      .record(
-        z.string().min(1),
-        z.object({ rules: z.record(z.string(), z.unknown()).default({}) }).strict(),
-      )
-      .default({}),
-  })
-  .strict();
+const settingsSchema = z.strictObject({
+  severity: z.enum(["off", "info", "warning", "error"]),
+  when: z.optional(z.strictObject({ field: nonEmptyString, equals: z.unknown() })),
+  require: z.optional(nonEmptyString),
+  fields: z.optional(z.array(nonEmptyString).check(z.maxLength(2))),
+  taxonomy: z.optional(nonEmptyString),
+  min: z.optional(z.number().check(z.int(), z.gte(0), z.lte(100))),
+  field: z.optional(nonEmptyString),
+  targetCollection: z.optional(nonEmptyString),
+});
+
+const rawPolicySchema = z.strictObject({
+  version: z.literal(1),
+  mode: z.enum(["observe", "enforce"]),
+  defaults: z._default(z.record(z.string(), z.unknown()), {}),
+  collections: z._default(
+    z.record(
+      nonEmptyString,
+      z.strictObject({
+        rules: z._default(z.record(z.string(), z.unknown()), {}),
+      }),
+    ),
+    {},
+  ),
+});
 
 export interface CollectionPolicy {
   rules: Partial<Record<RuleId, RuleOptions>>;
