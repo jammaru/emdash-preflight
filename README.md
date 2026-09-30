@@ -1,4 +1,8 @@
-﻿# EmDash Preflight
+﻿<p align="center">
+  <img src="docs/logo.png" alt="EmDash Preflight" width="420">
+</p>
+
+# EmDash Preflight
 
 **The publish gate for EmDash.**
 
